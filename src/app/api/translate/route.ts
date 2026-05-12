@@ -2,108 +2,215 @@ import { NextRequest, NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-const MYMEMORY_API = "https://api.mymemory.translated.net/get";
-const CHUNK_LIMIT = 500; // MyMemory limit per request (chars)
+// ─────────────────────────────────────────────────────────────
+// Language code mapping (our internal → each API's format)
+// ─────────────────────────────────────────────────────────────
+const TO_GOOGLE: Record<string, string> = {
+  vi: "vi", en: "en", zh: "zh-CN", ja: "ja",
+  ko: "ko", fr: "fr", de: "de", es: "es", ar: "ar", ru: "ru",
+};
+const TO_DEEPL: Record<string, string> = {
+  vi: "VI", en: "EN-US", zh: "ZH", ja: "JA",
+  ko: "KO", fr: "FR", de: "DE", es: "ES", ar: "AR", ru: "RU",
+};
+const TO_AZURE: Record<string, string> = {
+  vi: "vi", en: "en", zh: "zh-Hans", ja: "ja",
+  ko: "ko", fr: "fr", de: "de", es: "es", ar: "ar", ru: "ru",
+};
 
-function chunkText(text: string, limit: number): string[] {
-  if (text.length <= limit) return [text];
-  const chunks: string[] = [];
-  let start = 0;
-  while (start < text.length) {
-    let end = start + limit;
+const CHUNK = 4800; // chars per request (safe for all APIs)
+
+function chunks(text: string, max: number): string[] {
+  if (text.length <= max) return [text];
+  const out: string[] = [];
+  let i = 0;
+  while (i < text.length) {
+    let end = i + max;
     if (end < text.length) {
-      // Try to break at sentence boundary
-      const boundary = text.lastIndexOf(".", end);
-      const boundary2 = text.lastIndexOf("。", end);
-      const best = Math.max(boundary, boundary2);
-      if (best > start + 100) end = best + 1;
+      const b = Math.max(text.lastIndexOf(".", end), text.lastIndexOf("。", end), text.lastIndexOf("\n", end));
+      if (b > i + 100) end = b + 1;
     }
-    chunks.push(text.slice(start, end).trim());
-    start = end;
+    out.push(text.slice(i, end).trim());
+    i = end;
   }
-  return chunks.filter((c) => c.length > 0);
+  return out.filter(Boolean);
 }
 
-async function translateChunk(
-  text: string,
-  targetLang: string,
-  sourceLang: string = "autodetect"
-): Promise<string> {
-  if (!text.trim()) return text;
-
-  const langPair =
-    sourceLang === "autodetect" ? `autodetect|${targetLang}` : `${sourceLang}|${targetLang}`;
-
-  const url = `${MYMEMORY_API}?q=${encodeURIComponent(text)}&langpair=${langPair}&de=translator@translaate.app`;
-
+// ─────────────────────────────────────────────────────────────
+// BACKEND 1: Google Translate unofficial (gtx) — no key needed
+// ─────────────────────────────────────────────────────────────
+async function googleTranslate(text: string, target: string): Promise<string> {
+  const tl = TO_GOOGLE[target] ?? target;
+  const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=${tl}&dt=t&q=${encodeURIComponent(text)}`;
   const res = await fetch(url, {
-    headers: { "User-Agent": "Translaate/1.0" },
+    headers: { "User-Agent": "Mozilla/5.0" },
+    signal: AbortSignal.timeout(10000),
   });
-
-  if (!res.ok) throw new Error(`MyMemory API error: ${res.status}`);
-
-  const data = await res.json();
-
-  if (data.responseStatus === 200 && data.responseData?.translatedText) {
-    return data.responseData.translatedText;
-  }
-
-  throw new Error(data.responseDetails || "Translation failed");
+  if (!res.ok) throw new Error(`Google gtx ${res.status}`);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const data: any = await res.json();
+  // Response: [[["translated","original",null,null,1],...],...]
+  if (!Array.isArray(data?.[0])) throw new Error("Google gtx: unexpected shape");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  return data[0].map((seg: any) => seg[0] ?? "").join("");
 }
 
-async function translateParagraph(
-  paragraph: string,
-  targetLang: string,
-  sourceLang: string
-): Promise<string> {
-  if (!paragraph.trim()) return paragraph;
+// ─────────────────────────────────────────────────────────────
+// BACKEND 2: Lingva Translate (open-source Google proxy) — no key
+// ─────────────────────────────────────────────────────────────
+const LINGVA_HOSTS = [
+  "https://lingva.ml",
+  "https://translate.plausibility.cloud",
+  "https://lingva.thedaviddelta.com",
+];
 
-  const chunks = chunkText(paragraph, CHUNK_LIMIT);
-  const translatedChunks: string[] = [];
-
-  for (const chunk of chunks) {
+async function lingvaTranslate(text: string, target: string): Promise<string> {
+  const tl = TO_GOOGLE[target] ?? target;
+  for (const host of LINGVA_HOSTS) {
     try {
-      const translated = await translateChunk(chunk, targetLang, sourceLang);
-      translatedChunks.push(translated);
-      // Small delay to avoid rate limiting
-      if (chunks.length > 1) await new Promise((r) => setTimeout(r, 150));
-    } catch {
-      translatedChunks.push(`[Translation unavailable for this segment]`);
+      const url = `${host}/api/v1/auto/${tl}/${encodeURIComponent(text)}`;
+      const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+      if (!res.ok) continue;
+      const data = await res.json() as { translation?: string };
+      if (data.translation) return data.translation;
+    } catch { /* try next host */ }
+  }
+  throw new Error("Lingva: all hosts failed");
+}
+
+// ─────────────────────────────────────────────────────────────
+// BACKEND 3: DeepL — requires DEEPL_API_KEY env var (free tier ok)
+// ─────────────────────────────────────────────────────────────
+async function deeplTranslate(text: string, target: string): Promise<string> {
+  const key = process.env.DEEPL_API_KEY;
+  if (!key) throw new Error("No DEEPL_API_KEY");
+  const tl  = TO_DEEPL[target] ?? target.toUpperCase();
+  // Free keys use api-free.deepl.com, paid keys use api.deepl.com
+  const host = key.endsWith(":fx") ? "api-free.deepl.com" : "api.deepl.com";
+  const res = await fetch(`https://${host}/v2/translate`, {
+    method: "POST",
+    headers: { "Authorization": `DeepL-Auth-Key ${key}`, "Content-Type": "application/json" },
+    body: JSON.stringify({ text: [text], target_lang: tl }),
+    signal: AbortSignal.timeout(12000),
+  });
+  if (!res.ok) throw new Error(`DeepL ${res.status}`);
+  const data = await res.json() as { translations: { text: string }[] };
+  return data.translations[0]?.text ?? "";
+}
+
+// ─────────────────────────────────────────────────────────────
+// BACKEND 4: Microsoft Azure Translator — requires AZURE_TRANSLATOR_KEY
+// ─────────────────────────────────────────────────────────────
+async function azureTranslate(text: string, target: string): Promise<string> {
+  const key    = process.env.AZURE_TRANSLATOR_KEY;
+  const region = process.env.AZURE_TRANSLATOR_REGION ?? "eastus";
+  if (!key) throw new Error("No AZURE_TRANSLATOR_KEY");
+  const tl  = TO_AZURE[target] ?? target;
+  const res = await fetch(
+    `https://api.cognitive.microsofttranslator.com/translate?api-version=3.0&to=${tl}`,
+    {
+      method: "POST",
+      headers: {
+        "Ocp-Apim-Subscription-Key": key,
+        "Ocp-Apim-Subscription-Region": region,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify([{ Text: text }]),
+      signal: AbortSignal.timeout(12000),
+    }
+  );
+  if (!res.ok) throw new Error(`Azure ${res.status}`);
+  const data = await res.json() as { translations: { text: string }[] }[];
+  return data[0]?.translations[0]?.text ?? "";
+}
+
+// ─────────────────────────────────────────────────────────────
+// BACKEND 5: MyMemory — free fallback
+// ─────────────────────────────────────────────────────────────
+async function myMemoryTranslate(text: string, target: string): Promise<string> {
+  const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(text.slice(0, 500))}&langpair=autodetect|${target}&de=translator@translaate.app`;
+  const res = await fetch(url, { signal: AbortSignal.timeout(8000) });
+  if (!res.ok) throw new Error(`MyMemory ${res.status}`);
+  const data = await res.json() as { responseStatus: number; responseData: { translatedText: string } };
+  if (data.responseStatus !== 200) throw new Error("MyMemory quota or error");
+  return data.responseData.translatedText;
+}
+
+// ─────────────────────────────────────────────────────────────
+// ORCHESTRATOR — tries backends in priority order
+// ─────────────────────────────────────────────────────────────
+type Backend = { name: string; fn: (t: string, l: string) => Promise<string>; enabled: boolean };
+
+function getBackends(): Backend[] {
+  return [
+    // Premium backends first (if keys provided)
+    { name: "deepl",   fn: deeplTranslate,   enabled: !!process.env.DEEPL_API_KEY },
+    { name: "azure",   fn: azureTranslate,   enabled: !!process.env.AZURE_TRANSLATOR_KEY },
+    // Free no-key backends
+    { name: "google",  fn: googleTranslate,  enabled: true },
+    { name: "lingva",  fn: lingvaTranslate,  enabled: true },
+    { name: "mymemory",fn: myMemoryTranslate,enabled: true },
+  ].filter(b => b.enabled);
+}
+
+async function translateText(text: string, target: string): Promise<{ text: string; backend: string }> {
+  if (!text.trim()) return { text, backend: "passthrough" };
+
+  const backends = getBackends();
+  const errors: string[] = [];
+
+  for (const backend of backends) {
+    try {
+      const translated = await backend.fn(text, target);
+      if (translated && translated.trim()) return { text: translated, backend: backend.name };
+    } catch (e) {
+      errors.push(`${backend.name}: ${e instanceof Error ? e.message : "failed"}`);
     }
   }
 
-  return translatedChunks.join(" ");
+  console.error("[translate] All backends failed:", errors);
+  throw new Error("All translation backends failed. Try again later.");
 }
 
+
+// ─────────────────────────────────────────────────────────────
+// ROUTE HANDLER
+// ─────────────────────────────────────────────────────────────
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json();
-    const { paragraphs, targetLang, sourceLang = "autodetect" } = body as {
+    const { paragraphs, targetLang } = await req.json() as {
       paragraphs: string[];
       targetLang: string;
-      sourceLang?: string;
     };
 
     if (!paragraphs || !Array.isArray(paragraphs)) {
-      return NextResponse.json({ error: "paragraphs array is required" }, { status: 400 });
+      return NextResponse.json({ error: "paragraphs array required" }, { status: 400 });
+    }
+    if (!targetLang) {
+      return NextResponse.json({ error: "targetLang required" }, { status: 400 });
     }
 
-    if (!targetLang || !["en", "vi", "zh", "ja", "ko", "fr", "de", "es"].includes(targetLang)) {
-      return NextResponse.json({ error: "Invalid target language" }, { status: 400 });
-    }
-
-    // Translate up to 50 paragraphs in one request (rate limit safety)
-    const limited = paragraphs.slice(0, 80);
     const translations: string[] = [];
+    let usedBackend = "unknown";
 
-    for (const para of limited) {
-      const translated = await translateParagraph(para, targetLang, sourceLang);
-      translations.push(translated);
+    for (const para of paragraphs.slice(0, 80)) {
+      const parts = chunks(para, CHUNK);
+      const segments: string[] = [];
+      for (const part of parts) {
+        const { text, backend } = await translateText(part, targetLang);
+        segments.push(text);
+        usedBackend = backend;
+        if (parts.length > 1) await new Promise(r => setTimeout(r, 80));
+      }
+      translations.push(segments.join(" "));
     }
 
-    return NextResponse.json({ translations });
+    return NextResponse.json({ translations, backend: usedBackend });
   } catch (err) {
     console.error("[translate] Error:", err);
-    return NextResponse.json({ error: "Translation service unavailable." }, { status: 500 });
+    return NextResponse.json(
+      { error: err instanceof Error ? err.message : "Translation service unavailable." },
+      { status: 500 }
+    );
   }
 }
