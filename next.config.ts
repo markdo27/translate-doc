@@ -1,17 +1,16 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Allow large file uploads (10 MB)
-  experimental: {
-    serverActions: {
-      bodySizeLimit: "11mb",
-    },
-  },
-  // Webpack config to allow pdf-parse to work correctly in Node runtime
+  // Note: Vercel Hobby plan caps serverless function request body at 4.5 MB.
+  // Pro/Team plans support up to 100 MB. Our API routes use formData() directly.
+
+
   webpack: (config, { isServer }) => {
     if (isServer) {
-      // pdf-parse relies on fs — make sure it stays server-side
-      config.externals = [...(config.externals ?? []), "canvas"];
+      // pdfjs-dist needs canvas as an optional peer dep — mark it as external
+      // so it's not bundled (and doesn't error when absent on Vercel)
+      const existingExternals = Array.isArray(config.externals) ? config.externals : [];
+      config.externals = [...existingExternals, "canvas", "sharp"];
     }
     return config;
   },

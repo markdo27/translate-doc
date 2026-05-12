@@ -1,36 +1,87 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Translaate 🌐
 
-## Getting Started
+A premium document translation tool — upload PDF, DOCX, or TXT files and translate to **English** or **Vietnamese** with correct diacritical accents.
 
-First, run the development server:
+## Features
+
+- 📄 Upload **PDF**, **DOCX**, **DOC**, **TXT** (up to 10 MB)
+- 🔍 **Auto-detect** source language (Chinese, Japanese, Arabic, Russian, and more)
+- 🇻🇳 **Tiếng Việt** — correct diacritics (`ắ ổ ụ ệ ồ ứ`)
+- 🇺🇸 **English** translation
+- ⚡ Streaming paragraph-by-paragraph progress
+- ⬇️ Export translated doc as **DOCX** or **TXT**
+- 🔒 No data stored — everything processed in-memory
+
+## Tech Stack
+
+| Layer | Technology |
+|---|---|
+| Framework | Next.js 15 (App Router) |
+| Styling | Vanilla CSS (dark glassmorphism) |
+| PDF parsing | `pdfjs-dist` (pure JS, Vercel-safe) |
+| DOCX parsing | `mammoth` |
+| Translation | [MyMemory API](https://mymemory.translated.net) (free, 100k chars/day) |
+| Export | `docx` npm package (client-side) |
+| Fonts | Inter + Noto Sans (full Unicode / CJK / Vietnamese) |
+
+## Local Development
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+# → http://localhost:3000
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+## Deploy to Vercel
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+### One-click deploy
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https://github.com/markdo27/translate-doc)
 
-## Learn More
+### Manual deploy
 
-To learn more about Next.js, take a look at the following resources:
+```bash
+npm i -g vercel
+vercel
+```
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+> **Note on file size limits:**
+> - Vercel **Hobby** plan: 4.5 MB max request body per serverless function
+> - Vercel **Pro** plan: supports larger payloads
+> - If you need >4.5 MB PDFs on Hobby, consider chunked streaming upload
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Environment Variables
 
-## Deploy on Vercel
+No API keys required. The app uses the free [MyMemory](https://mymemory.translated.net) translation API which allows 100,000 characters/day without a key.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+To increase limits, register for a free MyMemory key and add:
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```env
+MYMEMORY_KEY=your_key_here
+```
+
+Then update `src/app/api/translate/route.ts` to append `&key=${process.env.MYMEMORY_KEY}` to the API URL.
+
+## Project Structure
+
+```
+src/
+├── app/
+│   ├── globals.css              # Design system
+│   ├── page.tsx                 # Landing page
+│   ├── translate/page.tsx       # Translation workspace
+│   └── api/
+│       ├── parse/route.ts       # File parsing (PDF/DOCX/TXT)
+│       └── translate/route.ts   # MyMemory translation wrapper
+└── components/
+    ├── Header.tsx
+    ├── UploadZone.tsx
+    ├── DocumentViewer.tsx       # Source text pane
+    ├── TranslationPane.tsx      # Translated output pane
+    ├── LanguageSelector.tsx     # EN/VI toggle
+    └── ExportButton.tsx         # DOCX/TXT export
+```
+
+## License
+
+MIT
