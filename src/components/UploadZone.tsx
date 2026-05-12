@@ -1,122 +1,71 @@
 "use client";
-
 import { useCallback, useRef, useState } from "react";
 
-interface UploadZoneProps {
-  onFileSelect: (file: File) => void;
-  isLoading?: boolean;
-}
+interface Props { onFileSelect: (f: File) => void; isLoading?: boolean; }
 
-const ACCEPTED = [".pdf", ".docx", ".doc", ".txt"];
-const MAX_SIZE_MB = 10;
+const ACCEPT = [".pdf", ".docx", ".doc", ".txt"];
 
-export function UploadZone({ onFileSelect, isLoading }: UploadZoneProps) {
-  const [isDragging, setIsDragging] = useState(false);
+export function UploadZone({ onFileSelect, isLoading }: Props) {
+  const [drag, setDrag] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const ref = useRef<HTMLInputElement>(null);
 
-  const validate = (file: File): string | null => {
+  const handle = useCallback((file: File) => {
     const ext = "." + file.name.split(".").pop()?.toLowerCase();
-    if (!ACCEPTED.includes(ext) && !ACCEPTED.includes("." + file.type.split("/").pop())) {
-      return `Unsupported format. Please upload: ${ACCEPTED.join(", ")}`;
-    }
-    if (file.size > MAX_SIZE_MB * 1024 * 1024) {
-      return `File too large. Maximum size is ${MAX_SIZE_MB} MB.`;
-    }
-    return null;
-  };
+    if (!ACCEPT.includes(ext)) { setError("Unsupported format. Use PDF, DOCX, or TXT."); return; }
+    if (file.size > 10 * 1024 * 1024) { setError("File too large — max 10 MB."); return; }
+    setError(null);
+    onFileSelect(file);
+  }, [onFileSelect]);
 
-  const handleFile = useCallback(
-    (file: File) => {
-      const err = validate(file);
-      if (err) { setError(err); return; }
-      setError(null);
-      onFileSelect(file);
-    },
-    [onFileSelect]
-  );
-
-  const onDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setIsDragging(false);
-      const file = e.dataTransfer.files[0];
-      if (file) handleFile(file);
-    },
-    [handleFile]
-  );
-
-  const onInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) handleFile(file);
-    e.target.value = "";
-  };
+  const onDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault(); setDrag(false);
+    const f = e.dataTransfer.files[0];
+    if (f) handle(f);
+  }, [handle]);
 
   return (
-    <div style={{ width: "100%" }}>
+    <div>
       <div
-        className={`upload-zone${isDragging ? " upload-zone--drag" : ""}${isLoading ? " upload-zone--loading" : ""}`}
-        onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
-        onDragLeave={() => setIsDragging(false)}
+        className={`upload-zone${drag ? " upload-zone--drag" : ""}`}
+        onDragOver={e => { e.preventDefault(); setDrag(true); }}
+        onDragLeave={() => setDrag(false)}
         onDrop={onDrop}
-        onClick={() => !isLoading && inputRef.current?.click()}
-        role="button"
-        aria-label="Upload document"
-        tabIndex={0}
-        onKeyDown={(e) => e.key === "Enter" && !isLoading && inputRef.current?.click()}
-        id="upload-zone"
+        onClick={() => !isLoading && ref.current?.click()}
+        role="button" tabIndex={0} id="upload-zone"
+        onKeyDown={e => e.key === "Enter" && !isLoading && ref.current?.click()}
       >
         <input
-          ref={inputRef}
-          type="file"
-          className="upload-zone__input"
-          accept=".pdf,.docx,.doc,.txt,text/plain,application/pdf"
-          onChange={onInputChange}
-          tabIndex={-1}
-          id="file-input"
+          ref={ref} type="file" className="upload-zone__input"
+          accept=".pdf,.docx,.doc,.txt" onChange={e => { const f = e.target.files?.[0]; if (f) handle(f); e.target.value = ""; }}
+          tabIndex={-1} id="file-input"
         />
-
+        <div className="upload-zone__icon">
+          {isLoading ? "⚙️" : "↑"}
+        </div>
         {isLoading ? (
           <>
-            <span className="upload-zone__icon" style={{ animation: "none" }}>⚙️</span>
-            <p className="upload-zone__title">Processing document…</p>
+            <p className="upload-zone__title">Parsing document…</p>
             <p className="upload-zone__sub">Extracting text and detecting language</p>
-            <div className="progress-bar" style={{ maxWidth: 240, margin: "0 auto" }}>
-              <div className="progress-bar__fill progress-bar__fill--indeterminate" />
+            <div className="progress" style={{ maxWidth: 200, margin: "20px auto 0", borderRadius: 2 }}>
+              <div className="progress__bar progress__bar--run" />
             </div>
           </>
         ) : (
           <>
-            <span className="upload-zone__icon">📄</span>
-            <p className="upload-zone__title">
-              {isDragging ? "Drop your document here" : "Upload your document"}
-            </p>
-            <p className="upload-zone__sub">
-              Drag &amp; drop or click to browse — up to {MAX_SIZE_MB} MB
-            </p>
-            <div className="upload-zone__formats">
-              {ACCEPTED.map((f) => (
-                <span key={f} className="format-badge">{f.replace(".", "")}</span>
-              ))}
+            <p className="upload-zone__title">{drag ? "Drop to upload" : "Upload your document"}</p>
+            <p className="upload-zone__sub">Drag & drop, or click to browse — up to 10 MB</p>
+            <div className="upload-zone__badges">
+              {ACCEPT.map(f => <span key={f} className="badge">{f.replace(".", "")}</span>)}
             </div>
           </>
         )}
       </div>
-
       {error && (
-        <div
-          style={{
-            marginTop: 12,
-            padding: "10px 16px",
-            borderRadius: 8,
-            background: "rgba(239,68,68,0.1)",
-            border: "1px solid rgba(239,68,68,0.3)",
-            color: "#ef4444",
-            fontSize: "0.875rem",
-          }}
-          role="alert"
-        >
-          ⚠️ {error}
+        <div style={{ marginTop: 12, padding: "10px 16px", borderRadius: 10,
+          background: "rgba(255,69,58,0.08)", border: "1px solid rgba(255,69,58,0.18)",
+          color: "var(--err)", fontSize: 13 }} role="alert">
+          {error}
         </div>
       )}
     </div>

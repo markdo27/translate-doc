@@ -1,5 +1,4 @@
 "use client";
-
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Header from "@/components/Header";
@@ -8,281 +7,126 @@ import { TranslationPane } from "@/components/TranslationPane";
 import { LanguageSelector } from "@/components/LanguageSelector";
 import { ExportButton } from "@/components/ExportButton";
 
-interface DocData {
-  paragraphs: string[];
-  wordCount: number;
-  charCount: number;
-  detectedLang: string;
-  fileName: string;
-  fileSize: number;
+interface Doc {
+  paragraphs: string[]; wordCount: number; charCount: number;
+  detectedLang: string; fileName: string; fileSize: number;
 }
 
-const FILE_ICONS: Record<string, string> = {
-  pdf: "📕",
-  docx: "📘",
-  doc: "📘",
-  txt: "📄",
-};
-
-function fileIcon(name: string) {
-  const ext = name.split(".").pop()?.toLowerCase() ?? "txt";
-  return FILE_ICONS[ext] ?? "📄";
+function fmt(b: number) {
+  return b < 1048576 ? `${(b/1024).toFixed(1)} KB` : `${(b/1048576).toFixed(1)} MB`;
 }
 
-function formatSize(bytes: number) {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
-}
+const BATCH = 5;
 
-// Translate one paragraph via the API
-async function translateParagraphs(
-  paragraphs: string[],
-  targetLang: string
-): Promise<string[]> {
-  const res = await fetch("/api/translate", {
-    method: "POST",
+async function translateBatch(paragraphs: string[], targetLang: string): Promise<string[]> {
+  const res  = await fetch("/api/translate", { method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ paragraphs, targetLang }),
-  });
+    body: JSON.stringify({ paragraphs, targetLang }) });
   const data = await res.json();
   if (!res.ok) throw new Error(data.error ?? "Translation failed");
   return data.translations as string[];
 }
 
-// Batch size: translate N paragraphs at a time to show streaming progress
-const BATCH_SIZE = 5;
-
 export default function TranslatePage() {
   const router = useRouter();
-  const [doc, setDoc] = useState<DocData | null>(null);
-  const [targetLang, setTargetLang] = useState<"en" | "vi">("vi");
-  const [translations, setTranslations] = useState<(string | null)[]>([]);
-  const [translatingIndex, setTranslatingIndex] = useState<number | null>(null);
-  const [activeParagraph, setActiveParagraph] = useState<number | null>(null);
-  const [isTranslating, setIsTranslating] = useState(false);
-  const [translateError, setTranslateError] = useState<string | null>(null);
-  const abortRef = useRef<boolean>(false);
+  const [doc, setDoc] = useState<Doc | null>(null);
+  const [lang, setLang] = useState<"en"|"vi">("vi");
+  const [translations, setTranslations] = useState<(string|null)[]>([]);
+  const [transIdx, setTransIdx] = useState<number|null>(null);
+  const [running, setRunning] = useState(false);
+  const [err, setErr] = useState<string|null>(null);
+  const aborted = useRef(false);
 
-  // Load doc from sessionStorage
   useEffect(() => {
     const raw = sessionStorage.getItem("translaate_doc");
     if (!raw) { router.replace("/"); return; }
-    const data: DocData = JSON.parse(raw);
-    setDoc(data);
-    setTranslations(new Array(data.paragraphs.length).fill(null));
+    const d: Doc = JSON.parse(raw);
+    setDoc(d);
+    setTranslations(new Array(d.paragraphs.length).fill(null));
   }, [router]);
 
-  // Sync translations array length when doc changes
-  useEffect(() => {
-    if (doc) setTranslations(new Array(doc.paragraphs.length).fill(null));
-  }, [doc?.paragraphs.length]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Reset translations when language changes
-  const handleLangChange = (lang: "en" | "vi") => {
-    if (isTranslating) {
-      abortRef.current = true;
-      setIsTranslating(false);
-    }
-    setTargetLang(lang);
+  const reset = (newLang?: "en"|"vi") => {
+    aborted.current = true; setRunning(false); setTransIdx(null);
     setTranslations(new Array(doc?.paragraphs.length ?? 0).fill(null));
-    setTranslateError(null);
-    setTranslatingIndex(null);
+    setErr(null);
+    if (newLang) setLang(newLang);
   };
 
-  const startTranslation = useCallback(async () => {
-    if (!doc || isTranslating) return;
-    abortRef.current = false;
-    setIsTranslating(true);
-    setTranslateError(null);
+  const changeLang = (l: "en"|"vi") => { if (running) reset(l); else { setLang(l); reset(l); } };
+
+  const translate = useCallback(async () => {
+    if (!doc || running) return;
+    aborted.current = false; setRunning(true); setErr(null);
     setTranslations(new Array(doc.paragraphs.length).fill(null));
-
-    const { paragraphs } = doc;
-
     try {
-      for (let i = 0; i < paragraphs.length; i += BATCH_SIZE) {
-        if (abortRef.current) break;
-
-        const batch = paragraphs.slice(i, i + BATCH_SIZE);
-        setTranslatingIndex(i);
-
-        const results = await translateParagraphs(batch, targetLang);
-
-        setTranslations((prev) => {
-          const next = [...prev];
-          results.forEach((r, j) => { next[i + j] = r; });
-          return next;
-        });
+      for (let i = 0; i < doc.paragraphs.length; i += BATCH) {
+        if (aborted.current) break;
+        setTransIdx(i);
+        const batch  = doc.paragraphs.slice(i, i + BATCH);
+        const result = await translateBatch(batch, lang);
+        setTranslations(prev => { const n = [...prev]; result.forEach((r, j) => { n[i+j] = r; }); return n; });
       }
-    } catch (err: unknown) {
-      setTranslateError(
-        err instanceof Error ? err.message : "Translation failed. Please try again."
-      );
-    } finally {
-      setTranslatingIndex(null);
-      setIsTranslating(false);
-    }
-  }, [doc, isTranslating, targetLang]);
+    } catch (e: unknown) { setErr(e instanceof Error ? e.message : "Translation failed."); }
+    finally { setTransIdx(null); setRunning(false); }
+  }, [doc, running, lang]);
 
-  const stopTranslation = () => {
-    abortRef.current = true;
-    setIsTranslating(false);
-    setTranslatingIndex(null);
-  };
+  const [active, setActive] = useState<number|null>(null);
 
-  const handleReset = () => {
-    sessionStorage.removeItem("translaate_doc");
-    router.push("/");
-  };
+  if (!doc) return (
+    <div className="app"><Header />
+      <div style={{ display:"flex", alignItems:"center", justifyContent:"center", height:"60vh",
+        color:"var(--text-3)", fontSize:13 }}>Loading…</div>
+    </div>
+  );
 
-  if (!doc) {
-    return (
-      <div className="app-wrapper">
-        <Header />
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            height: "60vh",
-            color: "var(--text-muted)",
-            fontSize: "0.9rem",
-          }}
-        >
-          Loading document…
-        </div>
-      </div>
-    );
-  }
-
-  const doneCount = translations.filter((t) => t !== null).length;
+  const done = translations.filter(t => t !== null).length;
 
   return (
-    <div className="app-wrapper" style={{ height: "100vh", overflow: "hidden" }}>
+    <div className="app" style={{ height:"100vh", overflow:"hidden" }}>
       <Header />
-
-      <div className="translate-page">
+      <div className="workspace">
         {/* Toolbar */}
-        <div className="translate-toolbar">
-          {/* Left: file info */}
-          <div className="file-info" style={{ flex: 1, minWidth: 0 }}>
-            <div className={`file-icon file-icon--${doc.fileName.split(".").pop() ?? "txt"}`}>
-              {fileIcon(doc.fileName)}
+        <div className="toolbar">
+          <div className="toolbar__file">
+            <div className="file-icon">
+              {doc.fileName.endsWith(".pdf") ? "📕" : doc.fileName.endsWith(".docx") ? "📘" : "📄"}
             </div>
-            <div style={{ minWidth: 0 }}>
-              <div
-                className="file-info__name"
-                style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
-              >
-                {doc.fileName}
-              </div>
-              <div className="file-info__meta">
-                {doc.wordCount.toLocaleString()} words · {formatSize(doc.fileSize)} ·{" "}
-                {doc.paragraphs.length} paragraphs
-              </div>
+            <div>
+              <div className="file-name">{doc.fileName}</div>
+              <div className="file-meta">{doc.wordCount.toLocaleString()} words · {fmt(doc.fileSize)} · {doc.paragraphs.length} ¶</div>
             </div>
           </div>
 
-          {/* Center: language selector */}
-          <LanguageSelector
-            value={targetLang}
-            onChange={handleLangChange}
-            disabled={isTranslating}
-          />
+          <LanguageSelector value={lang} onChange={changeLang} disabled={running} />
 
-          {/* Right: actions */}
-          <div style={{ display: "flex", gap: 8, alignItems: "center", flexShrink: 0 }}>
-            {isTranslating ? (
-              <button
-                className="btn btn--danger btn--sm"
-                onClick={stopTranslation}
-                id="stop-translation-btn"
-              >
-                ⏹ Stop
-              </button>
-            ) : (
-              <button
-                className="btn btn--primary btn--sm"
-                onClick={startTranslation}
-                disabled={isTranslating}
-                id="translate-btn"
-              >
-                {doneCount > 0 ? "🔄 Retranslate" : "🌐 Translate"}
-              </button>
-            )}
-
-            <ExportButton
-              paragraphs={doc.paragraphs}
-              translations={translations}
-              targetLang={targetLang}
-              fileName={doc.fileName}
-              disabled={isTranslating}
-            />
-
-            <button
-              className="btn btn--glass btn--sm"
-              onClick={handleReset}
-              id="new-document-btn"
-              data-tooltip="Upload a new document"
-            >
-              ↩ New
-            </button>
+          <div className="toolbar__actions">
+            {running
+              ? <button className="btn btn--danger" onClick={() => reset()} id="stop-btn">Stop</button>
+              : <button className="btn btn--primary" onClick={translate} id="translate-btn">
+                  {done > 0 ? "Retranslate" : "Translate"}
+                </button>}
+            <ExportButton paragraphs={doc.paragraphs} translations={translations}
+              targetLang={lang} fileName={doc.fileName} disabled={running} />
+            <button className="btn btn--ghost" onClick={() => { sessionStorage.removeItem("translaate_doc"); router.push("/"); }}
+              id="new-doc-btn">← New</button>
           </div>
         </div>
 
-        {/* Error bar */}
-        {translateError && (
-          <div
-            role="alert"
-            style={{
-              padding: "10px 24px",
-              background: "rgba(239,68,68,0.1)",
-              borderBottom: "1px solid rgba(239,68,68,0.2)",
-              color: "#ef4444",
-              fontSize: "0.85rem",
-              flexShrink: 0,
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            ⚠️ {translateError}
-            <button
-              onClick={() => setTranslateError(null)}
-              style={{ marginLeft: "auto", background: "none", border: "none", color: "inherit", cursor: "pointer" }}
-            >
-              ✕
-            </button>
+        {err && (
+          <div className="errbar">
+            <span>{err}</span>
+            <button className="errbar__close" onClick={() => setErr(null)}>✕</button>
           </div>
         )}
 
         {/* Split view */}
-        <div className="translate-body">
-          {/* Source pane */}
-          <div className="translate-col">
-            <DocumentViewer
-              paragraphs={doc.paragraphs}
-              activeParagraph={activeParagraph}
-              onParagraphClick={setActiveParagraph}
-              title={doc.fileName}
-              detectedLang={doc.detectedLang}
-            />
-          </div>
-
-          {/* Divider */}
-          <div className="split-divider" />
-
-          {/* Translation pane */}
-          <div className="translate-col">
-            <TranslationPane
-              paragraphs={doc.paragraphs}
-              translations={translations}
-              translatingIndex={translatingIndex}
-              targetLang={targetLang}
-              activeParagraph={activeParagraph}
-              onParagraphClick={setActiveParagraph}
-            />
-          </div>
+        <div className="split">
+          <DocumentViewer paragraphs={doc.paragraphs} activeParagraph={active}
+            onParagraphClick={setActive} title={doc.fileName} detectedLang={doc.detectedLang} />
+          <div className="split__divider" />
+          <TranslationPane paragraphs={doc.paragraphs} translations={translations}
+            translatingIndex={transIdx} targetLang={lang}
+            activeParagraph={active} onParagraphClick={setActive} />
         </div>
       </div>
     </div>

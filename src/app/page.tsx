@@ -1,19 +1,14 @@
 "use client";
-
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import Header from "@/components/Header";
 import { UploadZone } from "@/components/UploadZone";
 
-const FEATURES = [
-  { icon: "📄", label: "PDF support" },
-  { icon: "📝", label: "DOCX / DOC" },
-  { icon: "🔤", label: "Plain text" },
-  { icon: "🇻🇳", label: "Tiếng Việt" },
-  { icon: "🇺🇸", label: "English" },
-  { icon: "✨", label: "Correct accents" },
-  { icon: "⬇️", label: "Export DOCX" },
-  { icon: "🔒", label: "No data stored" },
+const STEPS = [
+  { n: "01", icon: "↑", title: "Upload",   desc: "Drop a PDF, DOCX, or TXT file. Up to 10 MB." },
+  { n: "02", icon: "◎", title: "Detect",   desc: "Source language is automatically identified — Chinese, Japanese, Arabic, and more." },
+  { n: "03", icon: "⇄", title: "Translate",desc: "Choose English or Vietnamese. Translation streams paragraph by paragraph." },
+  { n: "04", icon: "↓", title: "Export",   desc: "Download the result as a clean DOCX or TXT file." },
 ];
 
 export default function Home() {
@@ -22,252 +17,85 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
 
   const handleFile = async (file: File) => {
-    setLoading(true);
-    setError(null);
-
+    setLoading(true); setError(null);
     try {
-      const formData = new FormData();
-      formData.append("file", file);
-
-      const res = await fetch("/api/parse", { method: "POST", body: formData });
+      const fd = new FormData();
+      fd.append("file", file);
+      const res  = await fetch("/api/parse", { method: "POST", body: fd });
       const data = await res.json();
-
       if (!res.ok) throw new Error(data.error ?? "Failed to parse file");
-
-      // Store parsed doc in sessionStorage and navigate to translate page
-      sessionStorage.setItem(
-        "translaate_doc",
-        JSON.stringify({
-          paragraphs: data.paragraphs,
-          wordCount: data.wordCount,
-          charCount: data.charCount,
-          detectedLang: data.detectedLang,
-          fileName: data.fileName,
-          fileSize: data.fileSize,
-        })
-      );
-
+      sessionStorage.setItem("translaate_doc", JSON.stringify(data));
       router.push("/translate");
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : "An unexpected error occurred");
-    } finally {
-      setLoading(false);
-    }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "An unexpected error occurred.");
+    } finally { setLoading(false); }
   };
 
   return (
-    <div className="app-wrapper">
+    <div className="app">
       <Header />
-
       <main>
-        {/* Hero */}
+        {/* ── HERO ── */}
         <section className="hero container">
-          <div className="anim-fade-in-up">
-            <div className="hero__eyebrow">
-              <span>✨</span> AI-Powered Document Translation
-            </div>
-            <h1 className="hero__title">
-              Translate documents with<br />
-              <span>perfect accents</span>
+          <div className="anim-up">
+            <p className="hero__label">Document Translation</p>
+            <h1 className="hero__h1">
+              Translate with<br /><em>perfect accents</em>
             </h1>
-            <p className="hero__subtitle">
-              Upload any PDF, DOCX, or TXT file and instantly translate it to
-              <strong style={{ color: "var(--vi-accent)" }}> Tiếng Việt</strong> or{" "}
-              <strong style={{ color: "var(--en-accent)" }}>English</strong> — with full
-              diacritical accuracy.
+            <p className="hero__sub">
+              Upload any PDF, DOCX, or TXT and get an accurate translation in
+              English or Vietnamese — diacritics included.
             </p>
+          </div>
 
-            <div className="feature-pills">
-              {FEATURES.map((f) => (
-                <div key={f.label} className="feature-pill">
-                  <span className="icon">{f.icon}</span>
-                  {f.label}
-                </div>
-              ))}
-            </div>
+          <div className="anim-up anim-up-1" style={{ maxWidth: 640, margin: "0 auto" }}>
+            <UploadZone onFileSelect={handleFile} isLoading={loading} />
+            {error && (
+              <div style={{ marginTop: 12, padding: "10px 16px", borderRadius: 10,
+                background: "rgba(255,69,58,0.08)", border: "1px solid rgba(255,69,58,0.18)",
+                color: "var(--err)", fontSize: 13 }} role="alert">
+                {error}
+              </div>
+            )}
           </div>
         </section>
 
-        {/* Upload */}
-        <section
-          className="container anim-fade-in-up"
-          style={{ maxWidth: 760, animationDelay: "0.1s" }}
-        >
-          <UploadZone onFileSelect={handleFile} isLoading={loading} />
-
-          {error && (
-            <div
-              role="alert"
-              style={{
-                marginTop: 16,
-                padding: "12px 20px",
-                borderRadius: 10,
-                background: "rgba(239,68,68,0.1)",
-                border: "1px solid rgba(239,68,68,0.3)",
-                color: "#ef4444",
-                fontSize: "0.9rem",
-              }}
-            >
-              ⚠️ {error}
-            </div>
-          )}
-        </section>
-
-        {/* How it works */}
-        <section
-          className="container anim-fade-in-up"
-          style={{
-            maxWidth: 900,
-            marginTop: 64,
-            animationDelay: "0.2s",
-          }}
-        >
-          <h2
-            style={{
-              textAlign: "center",
-              fontSize: "1.1rem",
-              fontWeight: 700,
-              letterSpacing: "0.1em",
-              textTransform: "uppercase",
-              color: "var(--text-muted)",
-              marginBottom: 32,
-            }}
-          >
-            How it works
-          </h2>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-              gap: 16,
-            }}
-          >
-            {[
-              {
-                step: "01",
-                icon: "📤",
-                title: "Upload",
-                desc: "Drop your PDF, DOCX, or TXT file into the upload zone.",
-              },
-              {
-                step: "02",
-                icon: "🔍",
-                title: "Detect",
-                desc: "We auto-detect the source language — Chinese, Japanese, English, and more.",
-              },
-              {
-                step: "03",
-                icon: "🌐",
-                title: "Translate",
-                desc: "Choose English or Vietnamese. Translation happens paragraph by paragraph.",
-              },
-              {
-                step: "04",
-                icon: "⬇️",
-                title: "Export",
-                desc: "Download your translated document as a clean DOCX or TXT file.",
-              },
-            ].map((item) => (
-              <div
-                key={item.step}
-                className="glass glass--raised"
-                style={{ padding: "24px 20px", position: "relative", overflow: "hidden" }}
-              >
-                <span
-                  style={{
-                    position: "absolute",
-                    top: 12,
-                    right: 16,
-                    fontSize: "2.5rem",
-                    fontWeight: 900,
-                    color: "var(--glass-border)",
-                    lineHeight: 1,
-                    fontVariantNumeric: "tabular-nums",
-                  }}
-                >
-                  {item.step}
-                </span>
-                <div style={{ fontSize: "1.8rem", marginBottom: 12 }}>{item.icon}</div>
-                <h3 style={{ fontSize: "1rem", fontWeight: 700, marginBottom: 8 }}>
-                  {item.title}
-                </h3>
-                <p style={{ fontSize: "0.85rem", color: "var(--text-secondary)", lineHeight: 1.6 }}>
-                  {item.desc}
-                </p>
+        {/* ── STEPS ── */}
+        <section className="steps container anim-up anim-up-2">
+          <p className="steps__label">How it works</p>
+          <div className="steps__grid">
+            {STEPS.map(s => (
+              <div key={s.n} className="step-card">
+                <p className="step-num">{s.n}</p>
+                <span className="step-icon">{s.icon}</span>
+                <p className="step-title">{s.title}</p>
+                <p className="step-desc">{s.desc}</p>
               </div>
             ))}
           </div>
         </section>
 
-        {/* Vietnamese accent showcase */}
-        <section
-          className="container anim-fade-in-up"
-          style={{ maxWidth: 900, marginTop: 48, marginBottom: 80, animationDelay: "0.3s" }}
-        >
-          <div
-            className="glass"
-            style={{
-              padding: "32px 40px",
-              borderColor: "rgba(255,107,53,0.2)",
-              background: "rgba(255,107,53,0.04)",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "flex-start", gap: 24, flexWrap: "wrap" }}>
-              <div style={{ flex: 1, minWidth: 200 }}>
-                <p
-                  style={{
-                    fontSize: "0.7rem",
-                    fontWeight: 700,
-                    letterSpacing: "0.1em",
-                    textTransform: "uppercase",
-                    color: "var(--text-muted)",
-                    marginBottom: 12,
-                  }}
-                >
-                  Source (Chinese)
-                </p>
-                <p
-                  style={{
-                    fontFamily: "var(--font-doc)",
-                    fontSize: "1.05rem",
-                    lineHeight: 1.8,
-                    color: "var(--text-primary)",
-                  }}
-                >
-                  中华人民共和国海商法是调整海上运输关系的法律规范。
+        {/* ── PREVIEW ── */}
+        <section className="preview-strip container anim-up anim-up-3">
+          <div className="preview-card">
+            <div className="preview-card__header">
+              <div className="preview-card__dot" style={{ background: "#FF5F57" }} />
+              <div className="preview-card__dot" style={{ background: "#FFBD2E" }} />
+              <div className="preview-card__dot" style={{ background: "#28C840" }} />
+              <span className="preview-card__title">Example — 中华人民共和国海商法</span>
+            </div>
+            <div className="preview-card__body">
+              <div className="preview-cell">
+                <p className="preview-cell__lang preview-cell__lang--zh">Source · Chinese</p>
+                <p className="preview-cell__text">
+                  中华人民共和国海商法是调整海上运输关系、船舶关系的法律规范，自1993年7月1日起施行。
                 </p>
               </div>
-              <div
-                style={{
-                  width: 1,
-                  background: "rgba(255,107,53,0.2)",
-                  alignSelf: "stretch",
-                  minHeight: 60,
-                }}
-              />
-              <div style={{ flex: 1, minWidth: 200 }}>
-                <p
-                  style={{
-                    fontSize: "0.7rem",
-                    fontWeight: 700,
-                    letterSpacing: "0.1em",
-                    textTransform: "uppercase",
-                    color: "var(--vi-accent)",
-                    marginBottom: 12,
-                  }}
-                >
-                  🇻🇳 Tiếng Việt — Correct accents
-                </p>
-                <p
-                  style={{
-                    fontFamily: "var(--font-doc)",
-                    fontSize: "1.05rem",
-                    lineHeight: 1.8,
-                    color: "var(--text-primary)",
-                  }}
-                >
-                  Luật Hàng hải Cộng hòa Nhân dân Trung Hoa là quy phạm pháp luật điều chỉnh các
-                  quan hệ vận tải biển.
+              <div style={{ background: "var(--border)" }} />
+              <div className="preview-cell">
+                <p className="preview-cell__lang preview-cell__lang--vi">🇻🇳 Tiếng Việt</p>
+                <p className="preview-cell__text">
+                  Luật Hàng hải Cộng hòa Nhân dân Trung Hoa là quy phạm pháp luật điều chỉnh quan hệ vận tải biển và quan hệ tàu thuyền, có hiệu lực từ ngày 1 tháng 7 năm 1993.
                 </p>
               </div>
             </div>

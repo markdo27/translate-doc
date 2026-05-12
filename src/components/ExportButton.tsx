@@ -1,8 +1,7 @@
 "use client";
-
 import { useState } from "react";
 
-interface ExportButtonProps {
+interface Props {
   paragraphs: string[];
   translations: (string | null)[];
   targetLang: "en" | "vi";
@@ -10,119 +9,56 @@ interface ExportButtonProps {
   disabled?: boolean;
 }
 
-export function ExportButton({
-  paragraphs,
-  translations,
-  targetLang,
-  fileName,
-  disabled,
-}: ExportButtonProps) {
-  const [exporting, setExporting] = useState(false);
+export function ExportButton({ paragraphs, translations, targetLang, fileName, disabled }: Props) {
+  const [busy, setBusy] = useState(false);
+  const base    = (fileName?.replace(/\.[^.]+$/, "") ?? "document") + `_${targetLang.toUpperCase()}`;
+  const hasData = translations.some(t => t !== null);
 
-  const baseName = fileName?.replace(/\.[^.]+$/, "") ?? "document";
-  const outName = `${baseName}_${targetLang.toUpperCase()}_translated`;
-
-  const completedCount = translations.filter((t) => t !== null).length;
-  const isDisabled = disabled || completedCount === 0;
-
-  // ── Export as TXT ────────────────────────────────────────
   const exportTxt = () => {
-    setExporting(true);
+    setBusy(true);
     try {
-      const lines = translations.map((t, i) =>
-        t !== null ? t : `[Not translated] ${paragraphs[i]}`
+      const blob = new Blob(
+        [translations.map((t, i) => t ?? paragraphs[i]).join("\n\n")],
+        { type: "text/plain;charset=utf-8" }
       );
-      const content = lines.join("\n\n");
-      const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${outName}.txt`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } finally {
-      setExporting(false);
-    }
+      const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `${base}.txt` });
+      a.click(); URL.revokeObjectURL(a.href);
+    } finally { setBusy(false); }
   };
 
-  // ── Export as DOCX (via docx library) ────────────────────
   const exportDocx = async () => {
-    setExporting(true);
+    setBusy(true);
     try {
-      const { Document, Packer, Paragraph, TextRun, HeadingLevel } = await import("docx");
-
-      const docParagraphs = [
-        new Paragraph({
-          text: `${outName}`,
-          heading: HeadingLevel.HEADING_1,
-        }),
-        new Paragraph({
-          children: [
-            new TextRun({
-              text: `Translated to ${targetLang === "vi" ? "Tiếng Việt" : "English"} by Translaate`,
-              color: "888888",
-              size: 20,
-            }),
-          ],
-        }),
-        new Paragraph({ text: "" }), // spacer
-        ...translations.map((t, i) =>
-          new Paragraph({
-            children: [
-              new TextRun({
-                text: t !== null ? t : `[Not translated] ${paragraphs[i]}`,
-                size: 24,
-              }),
-            ],
-            spacing: { after: 200 },
-          })
-        ),
-      ];
-
+      const { Document, Packer, Paragraph: DocxPara, TextRun, HeadingLevel } = await import("docx");
       const doc = new Document({
-        creator: "Translaate",
-        title: outName,
-        description: `Document translated to ${targetLang}`,
-        sections: [{ children: docParagraphs }],
+        creator: "Translaate", title: base,
+        sections: [{
+          children: [
+            new DocxPara({ text: base, heading: HeadingLevel.HEADING_1 }),
+            new DocxPara({ text: "" }),
+            ...translations.map((t, i) => new DocxPara({
+              children: [new TextRun({ text: t ?? paragraphs[i], size: 24 })],
+              spacing: { after: 180 },
+            })),
+          ],
+        }],
       });
-
-      const buffer = await Packer.toBlob(doc);
-      const url = URL.createObjectURL(buffer);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `${outName}.docx`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      console.error("DOCX export failed:", err);
-      alert("DOCX export failed. Falling back to TXT.");
-      exportTxt();
-    } finally {
-      setExporting(false);
-    }
+      const blob = await Packer.toBlob(doc);
+      const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: `${base}.docx` });
+      a.click(); URL.revokeObjectURL(a.href);
+    } catch { exportTxt(); }
+    finally { setBusy(false); }
   };
 
   return (
-    <div className="export-panel">
-      <button
-        className="btn btn--glass btn--sm"
-        onClick={exportTxt}
-        disabled={isDisabled || exporting}
-        id="export-txt-btn"
-        data-tooltip="Download as plain text"
-        aria-label="Export as TXT"
-      >
-        📝 TXT
+    <div className="export">
+      <button className="btn btn--ghost" onClick={exportTxt}
+        disabled={disabled || !hasData || busy} id="export-txt-btn">
+        TXT
       </button>
-      <button
-        className="btn btn--primary btn--sm"
-        onClick={exportDocx}
-        disabled={isDisabled || exporting}
-        id="export-docx-btn"
-        data-tooltip="Download as Word document"
-        aria-label="Export as DOCX"
-      >
-        {exporting ? "⚙️ Exporting…" : "⬇️ Export DOCX"}
+      <button className="btn btn--ghost" onClick={exportDocx}
+        disabled={disabled || !hasData || busy} id="export-docx-btn">
+        {busy ? "…" : "↓ DOCX"}
       </button>
     </div>
   );

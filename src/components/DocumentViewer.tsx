@@ -1,114 +1,66 @@
 "use client";
-
 import { useState } from "react";
 
-interface DocumentViewerProps {
+const LANGS: Record<string, string> = {
+  zh: "Chinese", ja: "Japanese", ko: "Korean", en: "English",
+  vi: "Vietnamese", ar: "Arabic", ru: "Russian", fr: "French",
+};
+
+interface Props {
   paragraphs: string[];
   activeParagraph: number | null;
-  onParagraphClick: (index: number) => void;
+  onParagraphClick: (i: number) => void;
   title?: string;
   detectedLang?: string;
 }
 
-const LANG_LABELS: Record<string, string> = {
-  zh: "中文 (Chinese)",
-  ja: "日本語 (Japanese)",
-  ko: "한국어 (Korean)",
-  en: "English",
-  vi: "Tiếng Việt",
-  ar: "العربية (Arabic)",
-  ru: "Русский (Russian)",
-  fr: "Français",
-  de: "Deutsch",
-  es: "Español",
-};
-
-export function DocumentViewer({
-  paragraphs,
-  activeParagraph,
-  onParagraphClick,
-  title,
-  detectedLang,
-}: DocumentViewerProps) {
+export function DocumentViewer({ paragraphs, activeParagraph, onParagraphClick, title, detectedLang }: Props) {
   const [copied, setCopied] = useState<number | null>(null);
 
-  const copyParagraph = async (text: string, idx: number) => {
+  const copy = async (text: string, i: number) => {
     await navigator.clipboard.writeText(text);
-    setCopied(idx);
-    setTimeout(() => setCopied(null), 1500);
+    setCopied(i); setTimeout(() => setCopied(null), 1500);
   };
 
   return (
-    <div className="doc-pane">
-      <div className="pane-header">
-        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <span className="pane-label pane-label--source">SOURCE</span>
+    <div className="pane">
+      <div className="pane__header">
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <span className="pane__tag">Source</span>
           {detectedLang && (
-            <span
-              style={{
-                fontSize: "0.72rem",
-                color: "var(--text-muted)",
-                background: "var(--glass-bg)",
-                border: "1px solid var(--glass-border)",
-                borderRadius: "var(--radius-full)",
-                padding: "2px 10px",
-              }}
-            >
-              🔍 {LANG_LABELS[detectedLang] ?? detectedLang}
+            <span style={{ fontSize: 11, color: "var(--text-3)",
+              background: "var(--surface-high)", border: "1px solid var(--border)",
+              borderRadius: 6, padding: "2px 8px" }}>
+              {LANGS[detectedLang] ?? detectedLang}
             </span>
           )}
         </div>
-        <span className="word-count">{paragraphs.length} paragraphs</span>
+        <span className="pane__count">{paragraphs.length} ¶</span>
       </div>
 
       {title && (
-        <div
-          style={{
-            padding: "12px 20px",
-            borderBottom: "1px solid var(--glass-border)",
-            fontSize: "0.8rem",
-            color: "var(--text-muted)",
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            flexShrink: 0,
-          }}
-        >
-          <span>📁</span>
-          <span style={{ fontWeight: 500, color: "var(--text-secondary)" }}>{title}</span>
+        <div style={{ padding: "8px 20px", borderBottom: "1px solid var(--border)",
+          fontSize: 11, color: "var(--text-3)", flexShrink: 0,
+          overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {title}
         </div>
       )}
 
-      <div className="pane-scroll" id="source-pane">
-        {paragraphs.map((para, idx) => (
+      <div className="pane__scroll" id="source-pane">
+        {paragraphs.map((p, i) => (
           <div
-            key={idx}
-            className={`doc-paragraph${activeParagraph === idx ? " doc-paragraph--active" : ""}`}
-            onClick={() => onParagraphClick(idx)}
-            role="button"
-            tabIndex={0}
-            aria-label={`Paragraph ${idx + 1}`}
-            onKeyDown={(e) => e.key === "Enter" && onParagraphClick(idx)}
-            id={`src-para-${idx}`}
+            key={i}
+            className={`para${activeParagraph === i ? " para--active" : ""}`}
+            onClick={() => onParagraphClick(i)}
+            role="button" tabIndex={0}
+            onKeyDown={e => e.key === "Enter" && onParagraphClick(i)}
+            id={`src-para-${i}`}
           >
-            <span
-              style={{
-                fontSize: "0.65rem",
-                color: "var(--text-muted)",
-                fontWeight: 700,
-                marginRight: 10,
-                userSelect: "none",
-              }}
-            >
-              {(idx + 1).toString().padStart(2, "0")}
-            </span>
-            {para}
-            <button
-              className="copy-btn"
-              onClick={(e) => { e.stopPropagation(); copyParagraph(para, idx); }}
-              aria-label={`Copy paragraph ${idx + 1}`}
-            >
-              {copied === idx ? "✓ Copied" : "Copy"}
+            <span className="para__n">{String(i + 1).padStart(2, "0")}</span>
+            <span className="para__text">{p}</span>
+            <button className="para__copy"
+              onClick={e => { e.stopPropagation(); copy(p, i); }}>
+              {copied === i ? "✓" : "Copy"}
             </button>
           </div>
         ))}
