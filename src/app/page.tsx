@@ -3,6 +3,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import Header from "@/components/Header";
 import { UploadZone } from "@/components/UploadZone";
+import Footer from "@/components/Footer";
 
 const STEPS = [
   { n: "01", icon: "↑", title: "Upload",   desc: "Drop a PDF, DOCX, or TXT file. Up to 10 MB." },
@@ -102,6 +103,8 @@ export default function Home() {
           </div>
         </section>
       </main>
+
+      <Footer />
     </div>
   );
 }
